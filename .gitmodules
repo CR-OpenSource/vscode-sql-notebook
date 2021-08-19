@@ -1,0 +1,4 @@
+[submodule "sqls"]
+	path = sqls
+	url = https://github.com/cmoog/sqls
+	branch = dev

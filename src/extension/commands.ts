@@ -4,8 +4,9 @@ import {
   ConnectionListItem,
   SQLNotebookConnections,
 } from './connections';
-import { DriverKey, getDriver, supportedDrivers } from './driver';
-import { storageKey, globalConnPool } from './extension';
+import { Driver, DriverKey, getDriver, supportedDrivers } from './driver';
+import { storageKey, globalConnPool, globalLspClient } from './extension';
+import { SqlsDriver } from './lsp';
 
 export const deleteConnectionConfiguration =
   (
@@ -133,14 +134,34 @@ export const connectToDatabase =
       vscode.window.showInformationMessage(
         `Successfully connected to "${match.name}"`
       );
+      globalLspClient.start({
+        host: match.host,
+        port: match.port,
+        password: password,
+        driver: sqlsDriver(match.driver),
+        database: match.database,
+        user: match.user,
+      });
     } catch (err) {
       vscode.window.showErrorMessage(
         `Failed to connect to "${match.name}": ${err.message}`
       );
       globalConnPool.pool = null;
+      globalLspClient.stop();
       connectionsSidepanel.setActive(null);
     }
   };
+
+const sqlsDriver = (driverKey: DriverKey): SqlsDriver => {
+  switch (driverKey) {
+    case 'mysql':
+      return 'mysql';
+    case 'postgres':
+      return 'postgresql';
+    default:
+      throw new Error('invalid driver: ' + driverKey);
+  }
+};
 
 const getUserInput = async (
   name: string,

@@ -7,6 +7,7 @@ import {
   deleteConnectionConfiguration,
 } from './commands';
 import { Pool, QueryResult, ResultTable, Row } from './driver';
+import { SqlLspClient } from './lsp';
 
 const notebookType = 'sql-notebook';
 export const storageKey = 'sqlnotebook-connections';
@@ -14,6 +15,8 @@ export const storageKey = 'sqlnotebook-connections';
 export const globalConnPool: { pool: Pool | null } = {
   pool: null,
 };
+
+export const globalLspClient = new SqlLspClient();
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
