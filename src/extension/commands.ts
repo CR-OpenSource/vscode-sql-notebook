@@ -134,14 +134,17 @@ export const connectToDatabase =
       vscode.window.showInformationMessage(
         `Successfully connected to "${match.name}"`
       );
-      globalLspClient.start({
-        host: match.host,
-        port: match.port,
-        password: password,
-        driver: sqlsDriver(match.driver),
-        database: match.database,
-        user: match.user,
-      });
+      const driver = sqlsDriver(match.driver);
+      if (driver) {
+        globalLspClient.start({
+          host: match.host,
+          port: match.port,
+          password: password,
+          driver,
+          database: match.database,
+          user: match.user,
+        });
+      }
     } catch (err) {
       vscode.window.showErrorMessage(
         `Failed to connect to "${match.name}": ${err.message}`
@@ -152,15 +155,14 @@ export const connectToDatabase =
     }
   };
 
-const sqlsDriver = (driverKey: DriverKey): SqlsDriver => {
+const sqlsDriver = (driverKey: DriverKey): SqlsDriver | null => {
   switch (driverKey) {
     case 'mysql':
       return 'mysql';
     case 'postgres':
       return 'postgresql';
-    default:
-      throw new Error('invalid driver: ' + driverKey);
   }
+  return null;
 };
 
 const getUserInput = async (
