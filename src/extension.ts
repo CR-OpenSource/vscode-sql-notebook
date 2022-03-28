@@ -39,6 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
   activateFormProvider(context);
 
   context.subscriptions.push(new SQLNotebookController());
+  context.subscriptions.push(new CustomSQLNotebookController());
 
   vscode.commands.registerCommand(
     'sqlnotebook.deleteConnectionConfiguration',
@@ -89,7 +90,7 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
 
       for (let output of raw.outputs) {
         let data = new TextEncoder().encode(stringify(output.value));
-        result.push(new vscode.NotebookCellOutputItem(data, output.mime));
+        result.push(vscode.NotebookCellOutputItem.text(output.value, output.mime));
       }
 
       return result;
@@ -151,6 +152,7 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
         language: cell.languageId,
         value: cell.value,
         outputs: asRawOutput(cell)
+
       });
     }
 
@@ -204,6 +206,97 @@ class SQLSerializer implements vscode.NotebookSerializer {
     );
   }
 }
+
+class CustomSQLNotebookController {
+  readonly controllerId = 'sqlnb-notebook-executor';
+  readonly notebookType = customNotebookType;
+  readonly label = 'SQL Notebook';
+  readonly supportedLanguages = ['sql'];
+
+  private readonly _controller: vscode.NotebookController;
+  private _executionOrder = 0;
+
+  constructor() {
+    this._controller = vscode.notebooks.createNotebookController(
+      this.controllerId,
+      this.notebookType,
+      this.label
+    );
+
+    this._controller.supportedLanguages = this.supportedLanguages;
+    this._controller.supportsExecutionOrder = true;
+    this._controller.executeHandler = this._execute.bind(this);
+  }
+
+  private _execute(
+    cells: vscode.NotebookCell[],
+    _notebook: vscode.NotebookDocument,
+    _controller: vscode.NotebookController
+  ): void {
+    for (let cell of cells) {
+      this.doExecution(cell);
+    }
+  }
+
+  dispose() {
+    globalConnPool.pool?.end();
+  }
+
+  private async doExecution(cell: vscode.NotebookCell): Promise<void> {
+    const execution = this._controller.createNotebookCellExecution(cell);
+    execution.executionOrder = ++this._executionOrder;
+    execution.start(Date.now());
+
+    // this is a sql block
+    const rawQuery = cell.document.getText();
+    if (!globalConnPool.pool) {
+      writeErr(
+        execution,
+        'No active connection found. Configure database connections in the SQL Notebook sidepanel.'
+      );
+      return;
+    }
+    const conn = await globalConnPool.pool.getConnection();
+    execution.token.onCancellationRequested(() => {
+      console.debug('got cancellation request');
+      (async () => {
+        conn.release();
+        conn.destroy();
+        writeErr(execution, 'Query cancelled');
+      })();
+    });
+
+    console.debug('executing query', { query: rawQuery });
+    let result: ExecutionResult;
+    try {
+      result = await conn.query(rawQuery);
+      console.debug('sql query completed', result);
+      conn.release();
+    } catch (err) {
+      console.debug('sql query failed', err);
+      // @ts-ignore
+      writeErr(execution, err.message);
+      conn.release();
+      return;
+    }
+
+    if (typeof result === 'string') {
+      writeSuccess(execution, result);
+      return;
+    }
+
+    if (
+      result.length === 0 ||
+      (result.length === 1 && result[0].length === 0)
+    ) {
+      writeSuccess(execution, 'Successfully executed query');
+      return;
+    }
+    const tables = result.map((r) => resultToMarkdownTable(r));
+    writeSuccess(execution, tables, 'text/markdown');
+  }
+}
+
 
 class SQLNotebookController {
   readonly controllerId = 'sql-notebook-executor';

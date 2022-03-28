@@ -50,7 +50,7 @@
         "priority": "option",
         "selector": [
           {
-            "filenamePattern": "*.sql"
+            "filenamePattern": "*.sqlnb"
           }
         ]
       }
