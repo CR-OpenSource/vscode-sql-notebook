@@ -19,6 +19,7 @@
   ],
   "activationEvents": [
     "onNotebook:sql-notebook",
+    "onNotebook:sqln-notebook",
     "onView:sqlnotebook-connections"
   ],
   "main": "./out/extension/extension.js",
@@ -36,6 +37,16 @@
       {
         "type": "sql-notebook",
         "displayName": "SQL Notebook",
+        "priority": "option",
+        "selector": [
+          {
+            "filenamePattern": "*.sql"
+          }
+        ]
+      },
+      {
+        "type": "sqln-notebook",
+        "displayName": "SQLN Notebook",
         "priority": "option",
         "selector": [
           {
@@ -167,7 +178,8 @@
     "vscode-notebook-error-overlay": "^1.0.1",
     "vscode-test": "^1.5.2",
     "webpack": "^5.65.0",
-    "webpack-cli": "^4.9.1"
+    "webpack-cli": "^4.9.1",
+    "json-stringify-safe": "^5.0.1"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^0.8.4",
