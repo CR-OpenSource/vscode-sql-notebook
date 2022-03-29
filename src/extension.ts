@@ -57,15 +57,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
-interface RawNotebookCell {
+interface IRawNotebookCell {
   language: string;
   value: string;
   kind: vscode.NotebookCellKind;
   editable?: boolean;
-  outputs: RawCellOutput[];
+  outputs: IRawCellOutput[];
 }
 
-interface RawCellOutput {
+interface IRawCellOutput {
   mime: string;
   value: any;
 }
@@ -78,35 +78,22 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
     var contents = new TextDecoder().decode(context);    // convert to String to make JSON object
 
     // Read file contents
-    let raw: RawNotebookCell[];
+    let raw: IRawNotebookCell[];
     try {
-      raw = <RawNotebookCell[]>JSON.parse(contents);
+      raw = <IRawNotebookCell[]>JSON.parse(contents);
     } catch {
       raw = [];
     }
 
-    function convertRawOutputToBytes(raw: RawNotebookCell) {
-      let result: vscode.NotebookCellOutputItem[] = [];
-
-      for (let output of raw.outputs) {
-        let data = new TextEncoder().encode(stringify(output.value));
-        result.push(vscode.NotebookCellOutputItem.text(output.value, output.mime));
-      }
-
-      return result;
-    }
-
     // Create array of Notebook cells for the VS Code API from file contents
-    const cells = raw.map(item => new vscode.NotebookCellData(
-      item.kind,
-      item.value,
-      item.language
-    ));
-
-    for (let i = 0; i < cells.length; i++) {
-      let cell = cells[i];
-      cell.outputs = raw[i].outputs ? [new vscode.NotebookCellOutput(convertRawOutputToBytes(raw[i]))] : [];
-    }
+    const cells: vscode.NotebookCellData[] = raw.map((item) => {
+      return {
+        kind: item.kind,
+        value: item.value,
+        languageId: item.language,
+        outputs: item.outputs ? [new vscode.NotebookCellOutput(this.ConvertToNotebookCellOutputItem(item))] : []
+      }
+    });
 
     // Pass read and formatted Notebook Data to VS Code to display Notebook with saved cells
     return new vscode.NotebookData(
@@ -119,45 +106,56 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
     data: vscode.NotebookData,
     _token: vscode.CancellationToken
   ): Promise<Uint8Array> {
-    // function to take output renderer data to a format to save to the file
-    function asRawOutput(cell: vscode.NotebookCellData): RawCellOutput[] {
-      let result: RawCellOutput[] = [];
-      for (let output of cell.outputs ?? []) {
-        for (let item of output.items) {
-          let outputContents = '';
-          try {
-            outputContents = new TextDecoder().decode(item.data);
-          } catch {
-
-          }
-
-          try {
-            let outputData = JSON.parse(outputContents);
-            result.push({ mime: item.mime, value: outputData });
-          } catch {
-            result.push({ mime: item.mime, value: outputContents });
-          }
-        }
-      }
-      return result;
-    }
 
     // Map the Notebook data into the format we want to save the Notebook data as
 
-    let contents: RawNotebookCell[] = [];
+    let contents: IRawNotebookCell[] = [];
 
     for (const cell of data.cells) {
       contents.push({
         kind: cell.kind,
         language: cell.languageId,
         value: cell.value,
-        outputs: asRawOutput(cell)
-
+        outputs: this.ConvertToRawCellOutput(cell)
       });
     }
 
     // Give a string of all the data to save and VS Code will handle the rest 
     return new TextEncoder().encode(stringify(contents));
+  }
+
+  // function to take output renderer data to a format to save to the file
+  private ConvertToRawCellOutput(cell: vscode.NotebookCellData): IRawCellOutput[] {
+    let result: IRawCellOutput[] = [];
+    for (let output of cell.outputs ?? []) {
+      for (let item of output.items) {
+        let outputContents = '';
+        try {
+          outputContents = new TextDecoder().decode(item.data);
+        } catch {
+          //TODO handle this better
+        }
+
+        try {
+          let outputData = JSON.parse(outputContents);
+          result.push({ mime: item.mime, value: outputData });
+        } catch {
+          result.push({ mime: item.mime, value: outputContents });
+        }
+      }
+    }
+    return result;
+  }
+
+  private ConvertToNotebookCellOutputItem(raw: IRawNotebookCell): vscode.NotebookCellOutputItem[] {
+    let result: vscode.NotebookCellOutputItem[] = [];
+
+    for (let output of raw.outputs) {
+      let data = new TextEncoder().encode(stringify(output.value));
+      result.push(vscode.NotebookCellOutputItem.text(output.value, output.mime));
+    }
+
+    return result;
   }
 }
 
