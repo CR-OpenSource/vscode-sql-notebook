@@ -56,19 +56,30 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() { }
-
-interface IRawNotebookCell {
-  language: string;
-  value: string;
-  kind: vscode.NotebookCellKind;
-  editable?: boolean;
-  outputs: IRawCellOutput[];
-}
-
 interface IRawCellOutput {
   mime: string;
   value: any;
 }
+interface IRawNotebookCell {
+  languageId: string;
+  value: string;
+  kind: vscode.NotebookCellKind;
+  editable?: boolean;
+  outputs: IRawCellOutput[];
+  executionSummary?: {
+    timing?: {
+      startTime: number,
+      endTime: number;
+    },
+    executionOrder?: number,
+    success?: boolean
+  }
+}
+
+interface IRawNotebookData {
+  cells: IRawNotebookCell[]
+}
+
 
 class CustomSQLSerializer implements vscode.NotebookSerializer {
   async deserializeNotebook(
@@ -78,51 +89,47 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
     var contents = new TextDecoder().decode(context);    // convert to String to make JSON object
 
     // Read file contents
-    let raw: IRawNotebookCell[];
+    let raw: IRawNotebookData;
     try {
-      raw = <IRawNotebookCell[]>JSON.parse(contents);
+      raw = <IRawNotebookData>JSON.parse(contents);
     } catch {
-      raw = [];
+      vscode.window.showErrorMessage("Unable to parse 'sqlnb' JSON");
+      return new vscode.NotebookData([]);
     }
 
-    // Create array of Notebook cells for the VS Code API from file contents
-    const cells: vscode.NotebookCellData[] = raw.map((item) => {
+    // Pass read and formatted Notebook Data to VS Code to display Notebook with saved cells
+    return new vscode.NotebookData(raw.cells.map((item) => {
       return {
         kind: item.kind,
         value: item.value,
-        languageId: item.language,
-        outputs: item.outputs ? [new vscode.NotebookCellOutput(this.ConvertToNotebookCellOutputItem(item))] : []
+        languageId: item.languageId,
+        outputs: item.outputs ? [new vscode.NotebookCellOutput(item.outputs.map(output => vscode.NotebookCellOutputItem.text(output.value, output.mime)))] : [],
+        executionSummary: item.executionSummary,
+        editable: item.editable
       }
-    });
-
-    // Pass read and formatted Notebook Data to VS Code to display Notebook with saved cells
-    return new vscode.NotebookData(
-      cells
-    );
-
+    }));
   }
 
   async serializeNotebook(
     data: vscode.NotebookData,
     _token: vscode.CancellationToken
   ): Promise<Uint8Array> {
-
-    // Map the Notebook data into the format we want to save the Notebook data as
-
-    let contents: IRawNotebookCell[] = [];
-
-    for (const cell of data.cells) {
-      contents.push({
-        kind: cell.kind,
-        language: cell.languageId,
-        value: cell.value,
-        outputs: this.ConvertToRawCellOutput(cell)
-      });
-    }
-
     // Give a string of all the data to save and VS Code will handle the rest 
-    return new TextEncoder().encode(stringify(contents));
+    return new TextEncoder().encode(stringify({
+      cells: data.cells.map(cell => {
+
+        return {
+          kind: cell.kind,
+          languageId: cell.languageId,
+          value: cell.value,
+          outputs: this.ConvertToRawCellOutput(cell),
+          executionSummary: cell.executionSummary,
+          editable: true
+        }
+      })
+    }));
   }
+
 
   // function to take output renderer data to a format to save to the file
   private ConvertToRawCellOutput(cell: vscode.NotebookCellData): IRawCellOutput[] {
@@ -147,16 +154,6 @@ class CustomSQLSerializer implements vscode.NotebookSerializer {
     return result;
   }
 
-  private ConvertToNotebookCellOutputItem(raw: IRawNotebookCell): vscode.NotebookCellOutputItem[] {
-    let result: vscode.NotebookCellOutputItem[] = [];
-
-    for (let output of raw.outputs) {
-      let data = new TextEncoder().encode(stringify(output.value));
-      result.push(vscode.NotebookCellOutputItem.text(output.value, output.mime));
-    }
-
-    return result;
-  }
 }
 
 class SQLSerializer implements vscode.NotebookSerializer {
@@ -279,7 +276,12 @@ class CustomSQLNotebookController {
     }
 
     if (typeof result === 'string') {
-      writeSuccess(execution, result);
+      execution.replaceOutput(
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.text(result, "text"),
+        ])
+      );
+      execution.end(true, Date.now());
       return;
     }
 
@@ -287,15 +289,18 @@ class CustomSQLNotebookController {
       result.length === 0 ||
       (result.length === 1 && result[0].length === 0)
     ) {
-      writeSuccess(execution, 'Successfully executed query');
+      execution.replaceOutput(
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.text("Query success", "text"),
+        ])
+      );
+      execution.end(true, Date.now());
       return;
     }
     const tables = result.map((r) => resultToMarkdownTable(r));
-    writeSuccess(execution, tables, 'text/markdown');
+    writeSuccessSQLNB(execution, result, 'application/json');
   }
 }
-
-
 class SQLNotebookController {
   readonly controllerId = 'sql-notebook-executor';
   readonly notebookType = notebookType;
@@ -370,7 +375,7 @@ class SQLNotebookController {
     }
 
     if (typeof result === 'string') {
-      writeSuccess(execution, result);
+      writeSuccessSQL(execution, result);
       return;
     }
 
@@ -378,11 +383,11 @@ class SQLNotebookController {
       result.length === 0 ||
       (result.length === 1 && result[0].length === 0)
     ) {
-      writeSuccess(execution, 'Successfully executed query');
+      writeSuccessSQL(execution, 'Successfully executed query');
       return;
     }
     const tables = result.map((r) => resultToMarkdownTable(r));
-    writeSuccess(execution, tables, 'text/markdown');
+    writeSuccessSQL(execution, tables, 'text/markdown');
   }
 }
 
@@ -432,7 +437,24 @@ function writeErr(execution: vscode.NotebookCellExecution, err: string) {
   execution.end(false, Date.now());
 }
 
-function writeSuccess(
+function writeSuccessSQLNB(
+  execution: vscode.NotebookCellExecution,
+  result: ExecutionResult | ExecutionResult[],
+  mimeType?: string
+) {
+  const items = result.length == 0 ? [result] : result;
+  execution.replaceOutput(
+    items.map(
+      (item) =>
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.json(item, mimeType),
+        ])
+    )
+  );
+  execution.end(true, Date.now());
+}
+
+function writeSuccessSQL(
   execution: vscode.NotebookCellExecution,
   text: string | string[],
   mimeType?: string
@@ -448,6 +470,9 @@ function writeSuccess(
   );
   execution.end(true, Date.now());
 }
+
+
+
 
 function splitSqlBlocks(raw: string): string[] {
   const blocks = [];
