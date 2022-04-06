@@ -19,6 +19,7 @@
   ],
   "activationEvents": [
     "onNotebook:sql-notebook",
+    "onNotebook:sqlnb-notebook",
     "onView:sqlnotebook-connections"
   ],
   "main": "./dist/index.js",
@@ -43,6 +44,16 @@
         "selector": [
           {
             "filenamePattern": "*.sql"
+          }
+        ]
+      },
+      {
+        "type": "sqlnb-notebook",
+        "displayName": "SQLNB Notebook",
+        "priority": "option",
+        "selector": [
+          {
+            "filenamePattern": "*.sqlnb"
           }
         ]
       }
@@ -145,7 +156,8 @@
     "compile": "ncc build ./src/main.ts --minify --out ./dist && webpack --config ./webview/webpack.config.js",
     "clean": "rm -rf ./dist",
     "lint": "eslint src --ext ts",
-    "watch": "ncc build ./src/main.ts --minify --watch --out ./dist & webpack --watch --config ./webview/webpack.config.js",
+    "watch": "ncc build ./src/main.ts --watch --out ./dist -s --no-source-map-register & webpack --watch --config ./webview/webpack.config.js",
+    
     "fmt": "prettier --write --ignore-path .gitignore ."
   },
   "devDependencies": {
@@ -173,20 +185,24 @@
     "prettier": "^2.6.0",
     "style-loader": "^1.2.1",
     "ts-loader": "^9.2.6",
-    "typescript": "^4.3.2",
+    "typescript": "^4.4",
     "vsce": "^2.7.0",
     "vscode-notebook-error-overlay": "^1.0.1",
     "vscode-test": "^1.5.2",
     "webpack": "^5.65.0",
-    "webpack-cli": "^4.9.1"
+    "webpack-cli": "^4.9.1",
+    "json-stringify-safe": "^5.0.1"
   },
   "dependencies": {
     "@vscode/webview-ui-toolkit": "^0.9.3",
+    "fp-ts": "^2.11.9",
+    "inversify": "^6.0.1",
     "mssql": "^7.2.1",
     "mysql2": "^2.3.0",
     "pg": "^8.7.1",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
+    "reflect-metadata": "^0.1.13",
     "vscode-languageclient": "^7.0.0"
   },
   "prettier": {

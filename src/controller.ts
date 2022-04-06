@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ExecutionResult, Row, TabularResult } from './driver';
+import { Conn, ExecutionResult, Row, TabularResult } from './driver';
 import { globalConnPool, notebookType } from './main';
 
 export class SQLNotebookController {
@@ -10,6 +10,25 @@ export class SQLNotebookController {
 
   private readonly _controller: vscode.NotebookController;
   private _executionOrder = 0;
+
+  private onCancellationRequested = (conn: Conn, execution: vscode.NotebookCellExecution) => {
+    console.debug('got cancellation request');
+    (async () => {
+      conn.release();
+      conn.destroy();
+      writeErr(execution, 'Query cancelled');
+    })();
+  }
+
+  private parseTextForQuery = (cell: vscode.NotebookCell, writeError: (message: string) => void) => {
+    // this is a sql block
+    const rawQuery = cell.document.getText();
+    if (!globalConnPool.pool) {
+      writeError('No active connection found. Configure database connections in the SQL Notebook sidepanel.');
+      return null;
+    }
+    return rawQuery
+  }
 
   constructor() {
     this._controller = vscode.notebooks.createNotebookController(
@@ -53,15 +72,7 @@ export class SQLNotebookController {
       return;
     }
     const conn = await globalConnPool.pool.getConnection();
-    execution.token.onCancellationRequested(() => {
-      console.debug('got cancellation request');
-      (async () => {
-        conn.release();
-        conn.destroy();
-        writeErr(execution, 'Query cancelled');
-      })();
-    });
-
+    execution.token.onCancellationRequested(() => this.onCancellationRequested(conn, execution));
     console.debug('executing query', { query: rawQuery });
     let result: ExecutionResult;
     try {
@@ -79,7 +90,7 @@ export class SQLNotebookController {
     if (typeof result === 'string') {
       execution.replaceOutput(
         new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text(result, "text"),
+          vscode.NotebookCellOutputItem.text(result),
         ])
       );
       return;
@@ -91,12 +102,116 @@ export class SQLNotebookController {
     ) {
       execution.replaceOutput(
         new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text("Successfully executed query", "text"),
+          vscode.NotebookCellOutputItem.text("Successfully executed query"),
         ])
       );
       return;
     }
     writeSuccess(execution, result, 'application/json');
+  }
+}
+
+export class SQLNBNotebookController {
+  readonly controllerId = 'sqlnb-notebook-executor';
+  readonly notebookType = "sqlnb-notebook";
+  readonly label = 'SQL Notebook';
+  readonly supportedLanguages = ['sql'];
+
+  private readonly _controller: vscode.NotebookController;
+  private _executionOrder = 0;
+  private conn: Conn | null = null;
+  constructor() {
+    console.log("[Controller activated]")
+    this._controller = vscode.notebooks.createNotebookController(
+      this.controllerId,
+      this.notebookType,
+      this.label
+    );
+
+    this._controller.supportedLanguages = this.supportedLanguages;
+    this._controller.supportsExecutionOrder = true;
+    this._controller.executeHandler = this._execute.bind(this);
+  }
+
+  private _execute(
+    cells: vscode.NotebookCell[],
+    _notebook: vscode.NotebookDocument,
+    _controller: vscode.NotebookController
+  ): void {
+    for (let cell of cells) {
+      this.doExecution(cell);
+    }
+  }
+
+  dispose() {
+    globalConnPool.pool?.end();
+  }
+
+  private async doExecution(cell: vscode.NotebookCell): Promise<void> {
+    const execution = this._controller.createNotebookCellExecution(cell);
+    execution.executionOrder = ++this._executionOrder;
+    execution.start(Date.now());
+
+    // this is a sql block
+    const rawQuery = cell.document.getText();
+    if (!globalConnPool.pool) {
+      writeErr(
+        execution,
+        'No active connection found. Configure database connections in the SQL Notebook sidepanel.'
+      );
+      return;
+    }    
+    if (this.conn == null) {
+      this.conn = await globalConnPool.pool.getConnection();
+      console.log("[CONNECTION MADE] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+      execution.token.onCancellationRequested(() => {
+        console.debug('got cancellation request');
+        (async () => {
+          this.conn?.release();
+          this.conn?.destroy();
+          writeErr(execution, 'Query cancelled');
+        })();
+      });
+    }
+
+
+    console.debug('executing query', { query: rawQuery });
+    let result: ExecutionResult;
+    try {
+      result = await this.conn.query(rawQuery);
+      console.debug('sql query completed', result);
+      //this.conn.release();
+    } catch (err) {
+      console.debug('sql query failed', err);
+      // @ts-ignore
+      writeErr(execution, err.message);
+      //this.conn.release();
+      return;
+    }
+
+    if (typeof result === 'string') {
+      execution.replaceOutput(
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.text(result, "text"),
+        ])
+      );
+      execution.end(true, Date.now());
+      return;
+    }
+
+    if (
+      result.length === 0 ||
+      (result.length === 1 && result[0].length === 0)
+    ) {
+      execution.replaceOutput(
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.text("Query success", "text"),
+        ])
+      );
+      execution.end(true, Date.now());
+      return;
+    }
+    writeSuccessSQLNB(execution, result, 'application/json');
   }
 }
 
@@ -108,6 +223,22 @@ function writeErr(execution: vscode.NotebookCellExecution, err: string) {
 }
 
 function writeSuccess(
+  execution: vscode.NotebookCellExecution,
+  result: ExecutionResult | ExecutionResult[],
+  mimeType?: string
+) {
+  const items = result.length == 0 ? [result] : result;
+  execution.replaceOutput(
+    items.map(
+      (item) =>
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.json(item, mimeType),
+        ])
+    )
+  );
+  execution.end(true, Date.now());
+}
+function writeSuccessSQLNB(
   execution: vscode.NotebookCellExecution,
   result: ExecutionResult | ExecutionResult[],
   mimeType?: string

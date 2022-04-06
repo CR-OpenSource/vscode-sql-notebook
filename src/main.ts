@@ -4,10 +4,11 @@ import { connectToDatabase, deleteConnectionConfiguration } from './commands';
 import { Pool } from './driver';
 import { activateFormProvider } from './form';
 import { SqlLspClient } from './lsp';
-import { SQLSerializer } from './serializer';
-import { SQLNotebookController } from './controller';
+import { SQLNBSerializer, SQLSerializer } from './serializer';
+import { SQLNBNotebookController, SQLNotebookController } from './controller';
 
 export const notebookType = 'sql-notebook';
+export const sqlnbnotebookType = 'sqlnb-notebook';
 export const storageKey = 'sqlnotebook-connections';
 
 export const globalConnPool: { pool: Pool | null } = {
@@ -17,21 +18,34 @@ export const globalConnPool: { pool: Pool | null } = {
 export const globalLspClient = new SqlLspClient();
 
 export function activate(context: vscode.ExtensionContext) {
+  console.log("Extension activated123")
+
   context.subscriptions.push(
-    vscode.workspace.registerNotebookSerializer(
+    vscode.   workspace.registerNotebookSerializer(
       notebookType,
       new SQLSerializer()
     )
   );
+
+  context.subscriptions.push(
+    vscode.workspace.registerNotebookSerializer(
+      sqlnbnotebookType,
+      new SQLNBSerializer()
+    )
+  );
+
+  context.subscriptions.push(new SQLNotebookController());
+  context.subscriptions.push(new SQLNBNotebookController())
+
+
   const connectionsSidepanel = new SQLNotebookConnections(context);
+
   vscode.window.registerTreeDataProvider(
     'sqlnotebook-connections',
     connectionsSidepanel
   );
 
   activateFormProvider(context);
-
-  context.subscriptions.push(new SQLNotebookController());
 
   vscode.commands.registerCommand(
     'sqlnotebook.deleteConnectionConfiguration',
@@ -41,10 +55,11 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.commands.registerCommand('sqlnotebook.refreshConnectionPanel', () => {
     connectionsSidepanel.refresh();
   });
+  
   vscode.commands.registerCommand(
     'sqlnotebook.connect',
     connectToDatabase(context, connectionsSidepanel)
   );
 }
 
-export function deactivate() {}
+export function deactivate() { }

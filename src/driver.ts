@@ -22,7 +22,7 @@ export type TabularResult = Row[];
 export type Row = { [key: string]: string | number | null };
 
 // Conn is an abstraction over driver-specific connection interfaces.
-interface Conn {
+export interface Conn {
   release: () => void;
   query: (q: string) => Promise<ExecutionResult>;
   destroy: () => void;
